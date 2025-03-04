@@ -2,7 +2,9 @@
 
 A modern, responsive chat interface built with React, TypeScript, and Tailwind CSS that connects to a Flask backend powered by OpenAI, LangChain, and Getzep.
 
-![Chat Bot Screenshot](https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?auto=format&fit=crop&q=80&w=1024)
+ScreenShot:
+<img width="811" height="400" alt="Screenshot 2025-03-03 at 11 22 30 PM" src="https://github.com/user-attachments/assets/23995f20-9183-4a47-a125-62c967973bc7" />
+
 
 ## Features
 
@@ -26,51 +28,79 @@ A modern, responsive chat interface built with React, TypeScript, and Tailwind C
 ### Prerequisites
 
 - Node.js 16+ and npm
-- Backend server running (see backend README)
+- Python 3.8+ and pip (for the backend)
 
-### Installation
+### Backend Setup
 
-1. Clone the repository:
+1. Navigate to the backend directory:
    ```bash
-   git clone https://github.com/yourusername/ai-chat-bot.git
-   cd ai-chat-bot
+   cd backend
    ```
+
+2. Create a Python virtual environment (recommended):
+   ```bash
+   python -m venv venv
+   ```
+
+3. Activate the virtual environment:
+   - On Windows:
+     ```bash
+     venv\Scripts\activate
+     ```
+   - On macOS/Linux:
+     ```bash
+     source venv/bin/activate
+     ```
+
+4. Install backend dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+5. Configure environment variables:
+   - Update the `.env` file in the backend directory:
+     ```
+   - Add your OpenAI API key: `OPENAI_API_KEY=your_openai_api_key_here`
+   - Add your Getzep API URL: `GETZEP_API_URL=your_getzep_api_url_here`
+     ```
+
+6. Start the backend server:
+   ```bash
+   python app.py
+   ```
+
+   The backend server will run on `http://localhost:5000` by default.
+
+### Frontend Setup
+
+1. Open a new terminal window and navigate to the project root directory.
 
 2. Install dependencies:
    ```bash
    npm install
    ```
-
-3. Configure environment variables:
-   - Copy `.env.example` to `.env` (if it exists)
-   - Update the environment variables:
-     ```
-     VITE_OPENAI_API_KEY=your_openai_api_key_here
-     VITE_GETZEP_API_URL=your_getzep_api_url_here
-     VITE_GETZEP_API_KEY=your_getzep_api_key_here
-     ```
-
-4. Start the development server:
+3. Start the development server:
    ```bash
    npm run dev
    ```
 
-5. Open your browser and navigate to `http://localhost:5173`
+4. Open your browser and navigate to `http://localhost:5173`
 
 ## Project Structure
 
 ```
-src/
-├── components/         # UI components
-│   ├── ChatHistory.tsx # Displays message history
-│   ├── ChatInput.tsx   # User input component
-│   └── ChatMessage.tsx # Individual message component
-├── services/           # API services
-│   └── chatService.ts  # Handles API communication
-├── types/              # TypeScript type definitions
-│   └── index.ts        # Shared types
-├── App.tsx             # Main application component
-└── main.tsx            # Application entry point
+/
+├── src/                # Frontend source code
+│   ├── components/     # UI components
+│   ├── services/       # API services
+│   ├── types/          # TypeScript type definitions
+│   ├── App.tsx         # Main application component
+│   └── main.tsx        # Application entry point
+│
+└── backend/            # Backend source code
+    ├── app.py          # Flask application
+    ├── getzep_client.py # Getzep API client
+    └── requirements.txt # Python dependencies
 ```
 
 ## API Integration
@@ -81,12 +111,10 @@ The frontend communicates with the Flask backend through the following endpoints
 - `GET /api/conversations/:id` - Retrieve a specific conversation
 - `POST /api/search` - Search through conversation history
 
-## Building for Production
+## Setting Up Getzep
 
-To build the application for production:
+To use Getzep for conversation storage and retrieval:
 
-```bash
-npm run build
-```
-
-This will generate optimized assets in the `dist` directory that can be deployed to any static hosting service.
+1. Sign up for a Getzep account at [getzep.com](https://getzep.com) or set up a self-hosted instance
+2. Create a new project and obtain your API URL and key
+3. Update both the frontend and backend `.env` files with your Getzep credentials
