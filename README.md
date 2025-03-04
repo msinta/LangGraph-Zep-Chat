@@ -3,7 +3,7 @@
 A modern, responsive chat interface built with React, TypeScript, and Tailwind CSS that connects to a Flask backend powered by OpenAI, LangChain, and Getzep.
 
 ScreenShot:
-<img width="1533" alt="Screenshot 2025-03-03 at 11 21 21 PM" src="https://github.com/user-attachments/assets/5ca87047-0ae9-452d-a7e2-483cdf841fb3" />
+<img width="811" height="400" alt="Screenshot 2025-03-03 at 11 22 30 PM" src="https://github.com/user-attachments/assets/23995f20-9183-4a47-a125-62c967973bc7" />
 
 
 ## Features
