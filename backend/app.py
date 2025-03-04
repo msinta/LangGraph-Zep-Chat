@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
-print("OPENAI_API_KEY:", os.getenv("OPENAI_API_KEY"))
 
 chat_model = ChatOpenAI(
     openai_api_key=os.getenv("OPENAI_API_KEY"),
