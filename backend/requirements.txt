@@ -1,0 +1,10 @@
+flask
+flask-cors
+python-dotenv
+langchain
+langchain-openai
+
+uuid
+langchain-community
+zep-cloud
+rich
