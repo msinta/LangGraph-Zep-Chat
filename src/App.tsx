@@ -32,10 +32,19 @@ function App() {
   const [userId, setUserId] = useState<string>("");
   const [conversationId, setConversationId] = useState<string>("");
 
+  // groupName is what we use in the app
+  const [groupName, setGroupName] = useState<string>("");
+
+  // Additional state to control editing
+  const [isEditingGroup, setIsEditingGroup] = useState<boolean>(false);
+  // A temporary buffer for editing
+  const [tempGroupName, setTempGroupName] = useState<string>("");
+
   /**
    * On component mount:
    *  1) Check localStorage for an existing userId, else create one (using unique-names-generator).
    *  2) ALWAYS create a new conversationId, so each refresh is a fresh session.
+   *  3) Load or create groupName from localStorage
    */
   useEffect(() => {
     // 1) Load or create userId
@@ -51,6 +60,16 @@ function App() {
     // 2) Always create a new conversationId on mount
     const newConvId = uuidv4();
     setConversationId(newConvId);
+
+    // 3) Load groupName if present
+    const storedGroupName = localStorage.getItem("groupName");
+    if (storedGroupName) {
+      setGroupName(storedGroupName);
+      setTempGroupName(storedGroupName); // so the input is in sync
+    } else {
+      setGroupName("");
+      setTempGroupName("");
+    }
   }, []);
 
   /**
@@ -77,6 +96,27 @@ function App() {
   };
 
   /**
+   * Save the group name from tempGroupName
+   */
+  const handleSaveGroupName = () => {
+    const newGroupName = tempGroupName.trim();
+    setGroupName(newGroupName);
+    localStorage.setItem("groupName", newGroupName);
+
+    // Turn off editing mode
+    setIsEditingGroup(false);
+  };
+
+  /**
+   * Cancel editing group name
+   */
+  const handleCancelGroupEdit = () => {
+    // Revert tempGroupName to current groupName
+    setTempGroupName(groupName);
+    setIsEditingGroup(false);
+  };
+
+  /**
    * Send a message to the backend.
    */
   const handleSendMessage = async (content: string) => {
@@ -97,11 +137,13 @@ function App() {
     }));
 
     try {
-      // Call the backend service with userId, conversationId, and the user message
+      // Now we want to pass groupName as well to the backend
+      // so it can add the user to that group (or create it).
       const { newConversationId, aiContent } = await sendMessage({
         userId,
         conversationId,
         message: content,
+        groupName, // We'll add this param in the service call
       });
 
       // If the backend returns a conversationId (like if it changed),
@@ -142,7 +184,7 @@ function App() {
             <MessageSquare className="text-blue-500" size={24} />
             <h1 className="text-xl font-semibold text-gray-800">AI Chat Bot</h1>
           </div>
-          {/* Display current user & session info */}
+          {/* Display current user, session, and group info */}
           <div className="flex items-center space-x-4">
             {/* User badge */}
             <div className="flex items-center space-x-1">
@@ -158,6 +200,46 @@ function App() {
               <span className="inline-block bg-green-100 text-green-800 text-xs font-medium px-2 py-1 rounded-full">
                 {conversationId || "none"}
               </span>
+            </div>
+
+            {/* Group name display or edit mode */}
+            <div className="flex items-center space-x-1">
+              <span className="text-gray-500 text-sm">Group:</span>
+              {isEditingGroup ? (
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="text"
+                    value={tempGroupName}
+                    onChange={(e) => setTempGroupName(e.target.value)}
+                    className="w-24 text-xs px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    placeholder="Enter group"
+                  />
+                  <button
+                    onClick={handleSaveGroupName}
+                    className="bg-blue-500 hover:bg-blue-600 text-white text-xs px-2 py-1 rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={handleCancelGroupEdit}
+                    className="bg-gray-300 hover:bg-gray-400 text-xs px-2 py-1 rounded focus:outline-none focus:ring-2 focus:ring-gray-400"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-2">
+                  <span className="inline-block bg-yellow-100 text-yellow-800 text-xs font-medium px-2 py-1 rounded-full">
+                    {groupName || "none"}
+                  </span>
+                  <button
+                    onClick={() => setIsEditingGroup(true)}
+                    className="bg-yellow-500 hover:bg-yellow-600 text-white text-xs px-2 py-1 rounded focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                  >
+                    Edit
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Create New User button */}

@@ -4,6 +4,7 @@ interface SendMessageParams {
   userId: string;
   conversationId: string;
   message: string;
+  groupName: string; // <--- new
 }
 
 interface SendMessageResponse {
@@ -15,23 +16,21 @@ export const sendMessage = async ({
   userId,
   conversationId,
   message,
+  groupName, // <--- new
 }: SendMessageParams): Promise<SendMessageResponse> => {
   try {
     const response = await fetch(`${API_URL}/chat`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         userId,
         conversationId,
         message,
+        groupName, // <--- new
       }),
     });
-    console.log("userId", userId);
-    console.log("conversationId", conversationId);
-    console.log("message", message);
-    console.log("response", response);
 
     if (!response.ok) {
       throw new Error(`API error: ${response.status}`);

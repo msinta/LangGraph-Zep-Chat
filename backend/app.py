@@ -16,6 +16,8 @@ from zep_cloud import Message
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import SystemMessage
+from pprint import pformat
 
 load_dotenv()
 
@@ -39,9 +41,8 @@ chat_model = ChatOpenAI(
 
 zep_client = Zep(api_key=os.getenv("ZEP_API_KEY"))
 
-# Local in-memory structures:
 # conversation_metadata:
-#   { conversationId -> { "user_id": <userId>, "session_id": <sessionId> } }
+#   { conversationId -> { "user_id": <userId>, "session_id": <sessionId>, "group_name": <str> } }
 conversation_metadata = {}
 
 # messages_db:
@@ -49,14 +50,25 @@ conversation_metadata = {}
 messages_db = {}
 
 # -------------------------------------------------
-# 2) HELPER FUNCTIONS (ZEP & LOCAL)
+# 2) HELPER FUNCTIONS
 # -------------------------------------------------
 
+def ensure_zep_group(group_name: str):
+    """Create or reuse a group in Zep."""
+    if not group_name:
+        return  # no group provided
+    try:
+        zep_client.group.add(group_id=group_name)
+        logger.info(f"Created or re-used group: {group_name}")
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "already exists" in error_msg:
+            logger.info(f"Group {group_name} already exists in Zep. Proceeding.")
+        else:
+            logger.error(f"Error creating group {group_name}: {str(e)}")
+
 def ensure_zep_user_and_session(user_id: str, conversation_id: str):
-    """
-    Ensure the given user_id exists in Zep; create if needed.
-    Then ensure conversation_id is a session for that user.
-    """
+    """Ensure user & session exist in Zep, store metadata locally."""
     try:
         zep_client.user.add(
             user_id=user_id,
@@ -72,6 +84,7 @@ def ensure_zep_user_and_session(user_id: str, conversation_id: str):
         else:
             logger.error(f"Error creating user {user_id}: {str(e)}")
             return
+
     try:
         zep_client.memory.add_session(
             user_id=user_id,
@@ -89,35 +102,23 @@ def ensure_zep_user_and_session(user_id: str, conversation_id: str):
     # Store locally
     conversation_metadata[conversation_id] = {
         "user_id": user_id,
-        "session_id": conversation_id
+        "session_id": conversation_id,
+        "group_name": "",
     }
 
-
 def store_message_in_zep(message: dict, conversation_id: str):
-    """
-    Store a message in Zep Cloud for the given conversation ID.
-
-    Args:
-        message (dict): { "id": <str>, "role": "user"|"assistant", "content": <str>, "timestamp": <str> }
-        conversation_id (str): The conversation ID representing a Zep session.
-
-    Side Effects:
-        - Looks up user_id & session_id from conversation_metadata
-        - Adds the message to Zep's memory for that session
-    """
+    """Store a message in Zep memory for this conversation."""
     session_data = conversation_metadata.get(conversation_id)
     if not session_data:
         logger.error("No Zep session metadata found for conversation %s", conversation_id)
         return
 
-    # Build a Zep message object
     msg_obj = Message(
         role=message["role"],
         role_type=message["role"],
         content=message["content"]
     )
     try:
-        # Actually store it in Zep
         result = zep_client.memory.add(session_data["session_id"], messages=[msg_obj])
         if result:
             logger.info(f"Stored message {message['id']} in Zep session {session_data['session_id']}")
@@ -133,26 +134,32 @@ def store_message_in_zep(message: dict, conversation_id: str):
 def handle_user_message(state: dict, config: RunnableConfig = None) -> dict:
     """
     Node 1:
-      - Extract userId, conversationId, and user message from state.
-      - Ensure Zep user & session exist (via ensure_zep_user_and_session).
+      - Extract userId, conversationId, groupName, and user message from state.
+      - Ensure Zep user & session exist.
+      - Ensure the group exists (if groupName is provided).
       - Store user message in local db & Zep.
-      - Return updated state for next node.
+      - Also add user message to the group graph if groupName is set.
+      - Return updated state.
     """
     user_id = state.get("userId") or ""
     conversation_id = state.get("conversationId") or str(uuid.uuid4())
+    group_name = state.get("groupName") or ""
     user_message = state.get("message", "")
 
     if not user_message:
         raise ValueError("Message is required")
 
-    print("user_id", user_id)
-    print("conversation_id", conversation_id)
-    print("user_message", user_message)
-
     # 1) Ensure user & session in Zep
     ensure_zep_user_and_session(user_id, conversation_id)
 
-    # 2) Store user message locally
+    # 2) Ensure group if provided
+    if group_name:
+        ensure_zep_group(group_name)
+        # Store group_name in local metadata
+        if conversation_id in conversation_metadata:
+            conversation_metadata[conversation_id]["group_name"] = group_name
+
+    # 3) Store user message locally
     if conversation_id not in messages_db:
         messages_db[conversation_id] = []
 
@@ -164,37 +171,88 @@ def handle_user_message(state: dict, config: RunnableConfig = None) -> dict:
     }
     messages_db[conversation_id].append(user_msg)
 
-    # 3) Store user message in Zep
+    # 4) Store user message in Zep
     store_message_in_zep(user_msg, conversation_id)
 
-    # Return updated state with conversationId & messages
+    # 5) (NEW) Add user message to group graph if groupName is provided
+    if group_name:
+        try:
+            # We store the user message as a text node in the group
+            zep_client.graph.add(
+                group_id=group_name,
+                type="text",
+                data=user_message  # store the raw user text
+            )
+            logger.info(f"Added user message to group {group_name} graph.")
+        except Exception as e:
+            logger.error(f"Error adding user message to group {group_name}: {str(e)}")
+
     return {
         "userId": user_id,
         "conversationId": conversation_id,
+        "groupName": group_name,
         "messages": messages_db[conversation_id]
     }
 
 def search_zep_history(state: dict, config: RunnableConfig = None) -> dict:
     """
     Node 2:
-      - Retrieve relevant conversation context/facts from Zep
-      - e.g. memory.get(session_id)
-      - Attach them to state["found_history"]
+      - Retrieve conversation context from Zep
+      - If groupName is provided, search the group graph for relevant data
+      - Attach them to state["found_history"] for generate_response
     """
     conversation_id = state.get("conversationId")
+    group_name = state.get("groupName") or ""
     if not conversation_id:
         raise ValueError("No conversationId found in state")
 
-    found_history = []
     session_data = conversation_metadata.get(conversation_id)
-    if session_data:
-        session_id = session_data["session_id"]
+    if not session_data:
+        logger.error(f"No metadata found for conversation {conversation_id}")
+        return {**state, "found_history": []}
+
+    session_id = session_data["session_id"]
+    user_id = session_data["user_id"]
+
+    found_history = []
+
+    # 1) Retrieve entire conversation from Zep
+    try:
+        conversation_obj = zep_client.memory.get(session_id)
+        if conversation_obj and conversation_obj.messages:
+            # Convert each Zep Message into a dict
+            for zep_msg in conversation_obj.messages:
+                found_history.append({
+                    "role_type": zep_msg.role_type,
+                    "content": zep_msg.content,
+                })
+    except Exception as e:
+        logger.error(f"Error retrieving conversation from Zep: {str(e)}")
+
+    # 2) Also do a text-based search for relevant group data
+    local_messages = state.get("messages", [])
+    last_user_content = ""
+    for msg in reversed(local_messages):
+        if msg["role"] == "user":
+            last_user_content = msg["content"]
+            break
+
+    if last_user_content.strip() and group_name:
         try:
-            conversation = zep_client.memory.get(session_id)
-            if conversation:
-                found_history = conversation.get("messages", [])
+            results = zep_client.graph.search(
+                group_id=group_name,
+                query=last_user_content,
+                scope="edges"
+            )
+            if results and results.edges:
+                for edge in results.edges:
+                    fact_text = getattr(edge, "fact", "Unknown group fact")
+                    found_history.append({
+                        "role_type": "assistant",
+                        "content": f"Group Fact: {fact_text}"
+                    })
         except Exception as e:
-            logger.error(f"Error retrieving conversation from Zep: {str(e)}")
+            logger.error(f"Error searching group graph for {group_name}: {str(e)}")
 
     return {
         **state,
@@ -205,6 +263,7 @@ def generate_response(state: dict, config: RunnableConfig = None) -> dict:
     """
     Node 3:
       - Combine local messages + found_history
+      - Insert found facts as a SystemMessage
       - Call LLM
       - Store AI message
       - Return final { conversationId, message }
@@ -213,27 +272,39 @@ def generate_response(state: dict, config: RunnableConfig = None) -> dict:
     found_history = state.get("found_history", [])
     local_messages = state.get("messages", [])
 
-    # Convert found_history from Zep into LangChain messages
-    merged_messages = []
+    # 1) Convert found_history from Zep (or group) into AI/user messages
+    found_history_msgs = []
     for msg in found_history:
         role = msg.get("role_type", "assistant")
         content = msg.get("content", "")
         if role == "user":
-            merged_messages.append(HumanMessage(content=content))
+            found_history_msgs.append(HumanMessage(content=content))
         else:
-            merged_messages.append(AIMessage(content=content))
+            found_history_msgs.append(AIMessage(content=content))
 
-    # Add local messages to merged
+    # 2) Build a single SystemMessage with all found facts
+    facts_text = "\n".join(
+        [m.content for m in found_history_msgs if isinstance(m, AIMessage)]
+    )
+    merged_messages = []
+
+    if facts_text.strip():
+        system_msg = SystemMessage(content=f"Relevant facts:\n{facts_text}")
+        merged_messages.append(system_msg)
+
+    # 3) Add the user's local messages to the prompt
     for msg in local_messages:
         if msg["role"] == "user":
             merged_messages.append(HumanMessage(content=msg["content"]))
         else:
             merged_messages.append(AIMessage(content=msg["content"]))
 
-    # Call LLM
+    logger.info("Merged messages for LLM prompt:\n%s", pformat(merged_messages, indent=2, width=80))
+
+    # 4) Call LLM
     ai_response = chat_model.invoke(merged_messages)
 
-    # Build & store final AI message
+    # 5) Build & store final AI message
     ai_msg = {
         "id": str(uuid.uuid4()),
         "role": "assistant",
@@ -280,18 +351,16 @@ def chat():
       {
         "userId": <str>,
         "conversationId": <str>,
-        "message": <str>
+        "message": <str>,
+        "groupName": <str>   <-- new
       }
 
-    If userId is new, the code will create that user in Zep.
-    If conversationId is new, the code will create a new session in Zep for that user.
-    Then it runs the graph, which:
-      - handle_user_message
-      - search_zep_history
-      - generate_response
-    and returns the final AI message.
+    Steps:
+      1) We ensure user+session
+      2) We ensure group if provided
+      3) We run the graph (handle_user_message -> search_zep_history -> generate_response)
 
-    Returns JSON:
+    Returns:
       {
         "conversationId": <str>,
         "message": {
@@ -304,9 +373,10 @@ def chat():
     """
     try:
         payload = request.json or {}
-        # For memory saver, we still need a "thread_id"
-        # We can use conversationId or userId, or both
         conversation_id = payload.get("conversationId") or str(uuid.uuid4())
+
+        group_name = payload.get("groupName", "")
+        payload["groupName"] = group_name
 
         result = graph.invoke(
             payload,
@@ -322,17 +392,17 @@ def chat():
 def get_conversation_route(conversation_id):
     """
     GET /api/conversations/<conversation_id>
-
     Retrieves the conversation from Zep or local fallback.
     """
     try:
         if conversation_id in conversation_metadata:
             session_id = conversation_metadata[conversation_id]["session_id"]
             conversation = zep_client.memory.get(session_id)
+
             if conversation:
                 return jsonify({
                     "conversationId": conversation_id,
-                    "messages": conversation.get("messages", []),
+                    "messages": conversation.messages,  # or convert them to dict if needed
                     "context": conversation.get("context", "")
                 })
 

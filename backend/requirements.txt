@@ -8,3 +8,4 @@ uuid
 langchain-community
 zep-cloud
 rich
+PyPDF2
